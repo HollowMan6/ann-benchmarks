@@ -1,0 +1,46 @@
+float:
+  any:
+    - base_args: ["@metric", "@dimension"]
+      constructor: OceanBaseFLAT
+      disabled: false
+      docker_tag: ann-benchmarks-oceanbase
+      module: ann_benchmarks.algorithms.oceanbase
+      name: oceanbase-flat
+      run_groups:
+        FLAT:
+          args:
+            placeholder: [0]
+    - base_args: ["@metric", "@dimension"]
+      constructor: OceanBaseIVFFLAT
+      disabled: false
+      docker_tag: ann-benchmarks-oceanbase
+      module: ann_benchmarks.algorithms.oceanbase
+      name: oceanbase-ivfflat
+      run_groups:
+        IVFFLAT:
+          args:
+            lists: [32, 64, 128, 256, 512, 1024, 2048, 4096]
+          query_args: [[1, 5, 10, 20, 50, 100, 150, 200]]
+    - base_args: ["@metric", "@dimension"]
+      constructor: OceanBaseIVFPQ
+      disabled: false
+      docker_tag: ann-benchmarks-oceanbase
+      module: ann_benchmarks.algorithms.oceanbase
+      name: oceanbase-ivfpq
+      run_groups:
+        IVFPQ:
+          args:
+            lists: [32, 64, 128, 256, 512, 1024, 2048, 4096]
+            seg: [2, 4]
+          query_args: [[1, 5, 10, 20, 50, 100, 150, 200]]
+    - base_args: ["@metric", "@dimension"]
+      constructor: OceanBaseHNSW
+      disabled: false
+      docker_tag: ann-benchmarks-oceanbase
+      module: ann_benchmarks.algorithms.oceanbase
+      name: oceanbase-hnsw
+      run_groups:
+        HNSW:
+          args:
+            m: [4, 8, 12, 16, 24, 36, 48, 64, 96]
+            ef_construction: [200, 500]
