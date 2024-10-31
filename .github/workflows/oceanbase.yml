@@ -1,0 +1,138 @@
+name: OceanBase benchmarks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Cancel the workflow for the previous commit when the new commit is pushed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: True
+
+jobs:
+  run-benchmarks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2880
+    strategy:
+      fail-fast: false
+      matrix:
+        dataset:
+          - deep-image-96-angular
+          - fashion-mnist-784-euclidean
+          - gist-960-euclidean
+          - glove-100-angular
+          - glove-200-angular
+          - mnist-784-euclidean
+          - random-xs-20-euclidean
+          - random-s-100-euclidean
+          - random-xs-20-angular
+          - random-s-100-angular
+          - sift-128-euclidean
+          - nytimes-256-angular
+          - nytimes-16-angular
+        algorithm:
+          - oceanbase-ivfpq
+          - oceanbase-ivfflat
+          - oceanbase-flat
+          - oceanbase-hnsw
+
+    name: ${{ matrix.algorithm }} (${{ matrix.dataset }})
+
+    env:
+      ALGORITHM: ${{ matrix.algorithm }}
+      DATASET: ${{ matrix.dataset }}
+
+    steps:
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        # this might remove tools that are actually needed,
+        # if set to "true" but frees about 6 GB
+        tool-cache: true
+
+    - name: Checkout the benchmark repository
+      uses: actions/checkout@v4
+
+    - name: Checkout OceanBase repository vector_search branch
+      uses: actions/checkout@v4
+      with:
+        repository: HollowMan6/oceanbase
+        ref: vector_search
+        path: oceanbase
+
+    - name: Install OS Dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y git wget rpm rpm2cpio cpio make build-essential binutils m4 libtool-bin libncurses6 libhdf5-dev libaio1t64
+        ls /usr/lib/x86_64-linux-gnu/libaio.so*
+        sudo ln -s /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
+        ls /usr/lib/x86_64-linux-gnu/libaio.so*
+
+    - name: Install Benchmark Dependencies
+      run: |
+        python3 -m venv venv
+        source venv/bin/activate
+        pip3 install pymysql ansicolors docker h5py matplotlib numpy pyyaml psutil scikit-learn jinja2 pytest datasets requests scipy
+
+    - name: Cache deps
+      id: cache-deps
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-deps
+      with:
+        key: ubuntu24.04-build-el9.x86_64-${{ hashFiles('oceanbase/deps/init/oceanbase.el9.x86_64.deps') }}
+        path: oceanbase/deps/3rd
+
+    - name: Build init
+      shell: bash
+      run: |
+        cd oceanbase
+        bash build.sh init
+
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        max-size: 30000M
+        save: true
+        key: ubuntu24
+
+    - name: Build OceanBase
+      run: |
+        cd oceanbase
+        bash build.sh release -DOB_USE_CCACHE=ON
+        cd build_release && make -j4
+        ccache -s
+
+    - name: Clean up build files
+      run: |
+        mv oceanbase/build_release/src/observer/observer .
+        rm -rf oceanbase/build_release/*
+        mkdir -p oceanbase/build_release/src/observer
+        mv observer oceanbase/build_release/src/observer/
+
+    - name: Start OceanBase
+      run: |
+        cd oceanbase
+        ./tools/deploy/obd.sh prepare -p /tmp/obtest
+        ./tools/deploy/obd.sh deploy -c ./tools/deploy/single.yaml
+
+    - name: Run the benchmark
+      timeout-minutes: 2880
+      run: |
+        source venv/bin/activate
+        python3 run.py --runs 5 --dataset $DATASET --algorithm $ALGORITHM --local
+        sudo chmod -R 777 results/
+        rm -rf results/*.png
+        mkdir -p results/${DATASET}_${ALGORITHM}
+        python3 plot.py --dataset $DATASET --output results/${DATASET}_${ALGORITHM}.png
+        python3 data_export.py --out results/${DATASET}_${ALGORITHM}.csv
+        python3 create_website.py --outputdir results/${DATASET}_${ALGORITHM} --scatter --latex
+        rm -rf results/${DATASET}
+
+    - name: Upload results to Artifact
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ${{ matrix.algorithm }}(${{ matrix.dataset }})
+        path: |
+          results/*
